@@ -1,0 +1,11 @@
+/Applications/CLion.app/Contents/bin/cmake/mac/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - Unix Makefiles" /Users/rohit/Code/Keyboards/zmk/app
+Including boilerplate (Zephyr workspace): /Users/rohit/Code/Keyboards/zmk/zephyr/cmake/app/boilerplate.cmake
+CMake Error at /Users/rohit/Code/Keyboards/zmk/zephyr/cmake/app/boilerplate.cmake:29 (cmake_minimum_required):
+  CMake 3.20.0 or higher is required.  You are running version 3.17.5
+Call Stack (most recent call first):
+  /Users/rohit/Code/Keyboards/zmk/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:24 (include)
+  /Users/rohit/Code/Keyboards/zmk/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:91 (include_boilerplate)
+  CMakeLists.txt:15 (find_package)
+
+
+-- Configuring incomplete, errors occurred!

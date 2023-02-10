@@ -21,6 +21,11 @@ LOG_MODULE_REGISTER(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/mouse.h>
 #endif /* CONFIG_ZMK_MOUSE */
 
+#include <zmk/trackpoint.h>
+
+#define SW0 DT_NODELABEL(button0)
+#define SW1 DT_NODELABEL(button1)
+
 #define ZMK_KSCAN_DEV DT_LABEL(ZMK_MATRIX_NODE_ID)
 
 void main(void) {
@@ -37,4 +42,5 @@ void main(void) {
 #ifdef CONFIG_ZMK_MOUSE
     zmk_mouse_init();
 #endif /* CONFIG_ZMK_MOUSE */
+    zmk_trackpoint_init();
 }
