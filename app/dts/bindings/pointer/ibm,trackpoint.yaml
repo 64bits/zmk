@@ -1,0 +1,11 @@
+# Copyright (c) 2018, Linaro Limited
+# SPDX-License-Identifier: Apache-2.0
+
+description: Trackpoint Module
+
+compatible: "ibm,trackpoint"
+
+properties:
+  gpios:
+    type: phandle-array
+    required: true
