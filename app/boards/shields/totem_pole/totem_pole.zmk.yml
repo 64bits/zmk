@@ -1,0 +1,11 @@
+file_format: "1"
+id: totem
+name: TOTEM_POLE
+type: shield
+url: https://google.com
+requires: [seeeduino_xiao_ble]
+features:
+  - keys
+siblings:
+  - totem_pole_left
+  - totem_pole_right
