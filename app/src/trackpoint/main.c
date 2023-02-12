@@ -16,9 +16,10 @@
 #define HIGH 1
 #define LOW 0
 
-uint8_t readBit;
-uint8_t readResult;
-uint8_t readBitMask;
+#define WAIT_CLK_HI if(clock_state == LOW) k_condvar_wait(&clock_high, &clock_mutex, K_FOREVER);
+#define WAIT_CLK_LO if(clock_state == HIGH) k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
+
+uint8_t clock_state;
 
 K_MUTEX_DEFINE(clock_mutex);
 K_CONDVAR_DEFINE(clock_low);
@@ -47,8 +48,8 @@ static void handle_clk_int(const struct device *gpio,
                          struct gpio_callback *cb, uint32_t pins)
 {
     k_mutex_lock(&clock_mutex, K_FOREVER);
-    uint8_t state = gpio_pin_get_raw(gpio, TP_CLK_PIN);
-    if (state == HIGH) {
+    clock_state = gpio_pin_get_raw(gpio, TP_CLK_PIN);
+    if (clock_state == HIGH) {
         k_condvar_broadcast(&clock_high);
     } else {
         k_condvar_broadcast(&clock_low);
@@ -82,7 +83,7 @@ void write(uint8_t data) {
     gohi(TP_CLK_PIN);	// start bit
     /* wait for device to take control of clock */
     k_mutex_lock(&clock_mutex, K_FOREVER);
-    k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
+    WAIT_CLK_LO
     // clear to send data
     for (i=0; i < 8; i++)
     {
@@ -93,8 +94,8 @@ void write(uint8_t data) {
         } else {
             golo(TP_DAT_PIN);
         }
-        k_condvar_wait(&clock_high, &clock_mutex, K_FOREVER);
-        k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
+        WAIT_CLK_HI
+        WAIT_CLK_LO
         parity = parity ^ (data & 0x01);
         data = data >> 1;
     }
@@ -106,12 +107,12 @@ void write(uint8_t data) {
         golo(TP_DAT_PIN);
     }
     // clock cycle - like ack.
-    k_condvar_wait(&clock_high, &clock_mutex, K_FOREVER);
-    k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
+    WAIT_CLK_HI
+    WAIT_CLK_LO
     // stop bit
     gohi(TP_DAT_PIN);
-    k_sleep(K_USEC(30));
-    k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
+    // k_sleep(K_USEC(30));
+    WAIT_CLK_LO
     k_mutex_unlock(&clock_mutex);
     // mode switch
     // todo: update to use interrupts
@@ -125,28 +126,28 @@ uint8_t read(void) {
     uint8_t data = 0x00;
     uint8_t i;
     uint8_t bit = 0x01;
+    k_mutex_lock(&clock_mutex, K_FOREVER);
     // start clock
     gohi(TP_CLK_PIN);
     gohi(TP_DAT_PIN);
-    k_mutex_lock(&clock_mutex, K_FOREVER);
-    // k_sleep(K_USEC(50));
-    k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
-    // k_sleep(K_USEC(5));  // not sure why.
-    k_condvar_wait(&clock_high, &clock_mutex, K_FOREVER);
+    //k_sleep(K_USEC(50));
+    WAIT_CLK_LO
+    //k_sleep(K_USEC(5));  // not sure why.
+    WAIT_CLK_HI
     for (i = 0; i < 8; i++) {
-        k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
+        WAIT_CLK_LO
         if (readPin(TP_DAT_PIN) == HIGH) {
             data = data | bit;
         }
-        k_condvar_wait(&clock_high, &clock_mutex, K_FOREVER);
+        WAIT_CLK_HI
         bit = bit << 1;
     }
     // eat parity bit, ignore it.
-    k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
-    k_condvar_wait(&clock_high, &clock_mutex, K_FOREVER);
+    WAIT_CLK_LO
+    WAIT_CLK_HI
     // eat stop bit
-    k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
-    k_condvar_wait(&clock_high, &clock_mutex, K_FOREVER);
+    WAIT_CLK_LO
+    WAIT_CLK_HI
     k_mutex_unlock(&clock_mutex);
     golo(TP_CLK_PIN);  // hold incoming data
     return data;
