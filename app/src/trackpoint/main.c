@@ -125,22 +125,7 @@ void write(uint8_t data) {
     golo(TP_CLK_PIN);
 }
 
-static void poll_trackpoint_fn(struct k_work *work)
-{
-    write(0xeb);
-    k_sleep(K_MSEC(1)); // Post-write wait?
-    currentBytes = 0;
-    gpio_pin_set(gpiodev, TP_CLK_PIN, HIGH);
-    gpio_pin_set(gpiodev, TP_DAT_PIN, HIGH);
-    k_sleep(K_MSEC(60));
-    //currentBytes = currentBytes >> 5;
-    printAllBytes();
-    k_work_reschedule_for_queue(&trackpoint_work_q, work, K_MSEC(50));
-}
-
-
-
-uint8_t bitReverse(uint8_t num) {
+int8_t bitReverse(int8_t num) {
     return ((num & 0x01) << 7)
     | ((num & 0x02) << 5)
     | ((num & 0x04) << 3)
@@ -149,6 +134,10 @@ uint8_t bitReverse(uint8_t num) {
     | ((num & 0x20) >> 3)
     | ((num & 0x40) >> 5)
     | ((num & 0x80) >> 7);
+}
+
+int8_t readByte(int8_t index) {
+    return bitReverse((currentBytes >> (3+index*11)) & 0xFF);
 }
 
 void printAllBytes()
@@ -160,6 +149,23 @@ void printAllBytes()
     printk("first byte = 0x%x\n", firstByte);
     printk("second byte = 0x%x\n", secondByte);
     printk("third byte = 0x%x\n\n", thirdByte);
+}
+
+static void poll_trackpoint_fn(struct k_work *work)
+{
+    write(0xeb);
+    k_sleep(K_MSEC(1)); // Post-write wait?
+    currentBytes = 0;
+    gpio_pin_set(gpiodev, TP_CLK_PIN, HIGH);
+    gpio_pin_set(gpiodev, TP_DAT_PIN, HIGH);
+    k_sleep(K_MSEC(60));
+    zmk_hid_mouse_movement_set(0, 0);
+    zmk_hid_mouse_scroll_set(0, 0);
+    zmk_hid_mouse_movement_update(CLAMP(readByte(1), INT8_MIN, INT8_MAX),
+                                  CLAMP(-readByte(0), INT8_MIN, INT8_MAX));
+    zmk_endpoints_send_mouse_report();
+    //printAllBytes();
+    k_work_reschedule_for_queue(&trackpoint_work_q, work, K_MSEC(50));
 }
 
 int zmk_trackpoint_init() {
