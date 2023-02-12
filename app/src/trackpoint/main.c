@@ -21,6 +21,8 @@ uint8_t bitsToRead;
 uint64_t currentBytes;
 uint8_t bit = 0x01;
 
+static struct k_work_delayable poll_trackpoint;
+
 const struct device *gpiodev;
 static struct k_work initialize_trackpoint;
 static struct k_work read_result;
@@ -123,16 +125,20 @@ void write(uint8_t data) {
     golo(TP_CLK_PIN);
 }
 
-static void initialize_trackpoint_fn(struct k_work *work)
+static void poll_trackpoint_fn(struct k_work *work)
 {
-    // Continue
-    k_sleep(K_MSEC(2000));
-    gpio_pin_set(gpiodev, TP_RST_PIN, LOW);
-    bitsToRead = 22;
-    gohi(TP_CLK_PIN);
-    gohi(TP_DAT_PIN);
-    k_sleep(K_MSEC(1000));
+    write(0xeb);
+    k_sleep(K_MSEC(1)); // Post-write wait?
+    currentBytes = 0;
+    gpio_pin_set(gpiodev, TP_CLK_PIN, HIGH);
+    gpio_pin_set(gpiodev, TP_DAT_PIN, HIGH);
+    k_sleep(K_MSEC(60));
+    //currentBytes = currentBytes >> 5;
+    printAllBytes();
+    k_work_reschedule_for_queue(&trackpoint_work_q, work, K_MSEC(50));
 }
+
+
 
 uint8_t bitReverse(uint8_t num) {
     return ((num & 0x01) << 7)
@@ -151,9 +157,9 @@ void printAllBytes()
     uint8_t secondByte = bitReverse((currentBytes >> 14) & 0xFF);
     uint8_t thirdByte = bitReverse((currentBytes >> 25) & 0xFF);
     printk("binary = 0x%" PRIx64 "\n", currentBytes);
-    printk("first byte = 0x%x", firstByte);
-    printk("second byte = 0x%x", secondByte);
-    printk("third byte = 0x%x", thirdByte);
+    printk("first byte = 0x%x\n", firstByte);
+    printk("second byte = 0x%x\n", secondByte);
+    printk("third byte = 0x%x\n\n", thirdByte);
 }
 
 int zmk_trackpoint_init() {
@@ -177,16 +183,16 @@ int zmk_trackpoint_init() {
     k_sleep(K_MSEC(2000));
     gpio_pin_set(gpiodev, TP_RST_PIN, LOW);
     k_sleep(K_MSEC(1000));
-    write(0xff);
-    printk("{INIT}");
-    k_sleep(K_MSEC(1)); // Post-write wait?
-    currentBytes = 0;
-    gpio_pin_set(gpiodev, TP_CLK_PIN, HIGH);
-    gpio_pin_set(gpiodev, TP_DAT_PIN, HIGH);
-    k_sleep(K_MSEC(60));
-    //currentBytes = currentBytes >> 5;
-    printAllBytes();
-//    k_work_init_delayable(&initialize_trackpoint, initialize_trackpoint_fn);
-//    k_work_reschedule_for_queue(&trackpoint_work_q, &initialize_trackpoint, K_MSEC(2000));
+//    write(0xff);
+//    printk("{INIT}");
+//    k_sleep(K_MSEC(1)); // Post-write wait?
+//    currentBytes = 0;
+//    gpio_pin_set(gpiodev, TP_CLK_PIN, HIGH);
+//    gpio_pin_set(gpiodev, TP_DAT_PIN, HIGH);
+//    k_sleep(K_MSEC(60));
+//    //currentBytes = currentBytes >> 5;
+//    printAllBytes();
+    k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
+    k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
     return 0;
 }
