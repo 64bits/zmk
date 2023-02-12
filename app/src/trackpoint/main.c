@@ -123,17 +123,6 @@ void write(uint8_t data) {
     golo(TP_CLK_PIN);
 }
 
-static void read_result_fn(struct k_work *work)
-{
-    uint8_t byte;
-    printk("\n[TP] The last read bytes were:\n");
-    while(currentBytes) {
-        byte = currentBytes >> 2 & 0xFF;
-        currentBytes = currentBytes >> 11;
-        printk("\n[TP] 0x%x\n", byte);
-    }
-}
-
 static void initialize_trackpoint_fn(struct k_work *work)
 {
     // Continue
@@ -143,8 +132,6 @@ static void initialize_trackpoint_fn(struct k_work *work)
     gohi(TP_CLK_PIN);
     gohi(TP_DAT_PIN);
     k_sleep(K_MSEC(1000));
-    k_work_init_delayable(&read_result, read_result_fn);
-    k_work_reschedule_for_queue(&trackpoint_work_q, &read_result, K_MSEC(50));
 }
 
 uint8_t bitReverse(uint8_t num) {
@@ -192,11 +179,11 @@ int zmk_trackpoint_init() {
     k_sleep(K_MSEC(1000));
     write(0xff);
     printk("{INIT}");
-    k_sleep(K_MSEC(1));
+    k_sleep(K_MSEC(1)); // Post-write wait?
     currentBytes = 0;
     gpio_pin_set(gpiodev, TP_CLK_PIN, HIGH);
     gpio_pin_set(gpiodev, TP_DAT_PIN, HIGH);
-    k_sleep(K_MSEC(2000));
+    k_sleep(K_MSEC(60));
     //currentBytes = currentBytes >> 5;
     printAllBytes();
 //    k_work_init_delayable(&initialize_trackpoint, initialize_trackpoint_fn);
