@@ -9,6 +9,7 @@
 #include <drivers/gpio.h>
 #include <zmk/hid.h>
 #include <zmk/endpoints.h>
+#include <inttypes.h>
 
 #define TP_CLK_PIN 13 // 8
 #define TP_DAT_PIN 14 // 9
@@ -17,7 +18,7 @@
 #define LOW 0
 
 uint8_t bitsToRead;
-uint64_t lastByte;
+uint64_t currentBytes;
 uint8_t bit = 0x01;
 
 const struct device *gpiodev;
@@ -37,8 +38,8 @@ struct k_work_q *zmk_trackpoint_work_q() {
 static void handle_clk_int(const struct device *gpio,
                            struct gpio_callback *cb, uint32_t pins)
 {
-    lastByte = lastByte | bit;
-    lastByte = lastByte << 1;
+    currentBytes = currentBytes | bit;
+    currentBytes = currentBytes << 1;
 }
 
 static void handle_dat_int(const struct device *gpio,
@@ -126,9 +127,9 @@ static void read_result_fn(struct k_work *work)
 {
     uint8_t byte;
     printk("\n[TP] The last read bytes were:\n");
-    while(lastByte) {
-        byte = lastByte >> 2 & 0xFF;
-        lastByte = lastByte >> 11;
+    while(currentBytes) {
+        byte = currentBytes >> 2 & 0xFF;
+        currentBytes = currentBytes >> 11;
         printk("\n[TP] 0x%x\n", byte);
     }
 }
@@ -144,6 +145,28 @@ static void initialize_trackpoint_fn(struct k_work *work)
     k_sleep(K_MSEC(1000));
     k_work_init_delayable(&read_result, read_result_fn);
     k_work_reschedule_for_queue(&trackpoint_work_q, &read_result, K_MSEC(50));
+}
+
+uint8_t bitReverse(uint8_t num) {
+    return ((num & 0x01) << 7)
+    | ((num & 0x02) << 5)
+    | ((num & 0x04) << 3)
+    | ((num & 0x08) << 1)
+    | ((num & 0x10) >> 1)
+    | ((num & 0x20) >> 3)
+    | ((num & 0x40) >> 5)
+    | ((num & 0x80) >> 7);
+}
+
+void printAllBytes()
+{
+    uint8_t firstByte = bitReverse((currentBytes >> 3) & 0xFF);
+    uint8_t secondByte = bitReverse((currentBytes >> 14) & 0xFF);
+    uint8_t thirdByte = bitReverse((currentBytes >> 25) & 0xFF);
+    printk("binary = 0x%" PRIx64 "\n", currentBytes);
+    printk("first byte = 0x%x", firstByte);
+    printk("second byte = 0x%x", secondByte);
+    printk("third byte = 0x%x", thirdByte);
 }
 
 int zmk_trackpoint_init() {
@@ -167,20 +190,15 @@ int zmk_trackpoint_init() {
     k_sleep(K_MSEC(2000));
     gpio_pin_set(gpiodev, TP_RST_PIN, LOW);
     k_sleep(K_MSEC(1000));
-    write(0xeb);
+    write(0xff);
     printk("{INIT}");
     k_sleep(K_MSEC(1));
-    lastByte = 0;
+    currentBytes = 0;
     gpio_pin_set(gpiodev, TP_CLK_PIN, HIGH);
     gpio_pin_set(gpiodev, TP_DAT_PIN, HIGH);
     k_sleep(K_MSEC(2000));
-    lastByte = lastByte >> 5;
-    uint8_t foo;
-    while(lastByte) {
-        foo = lastByte & 0xFF;
-        printk("\nByte: {0x%x}\n", foo);
-        lastByte = lastByte >> 8;
-    }
+    //currentBytes = currentBytes >> 5;
+    printAllBytes();
 //    k_work_init_delayable(&initialize_trackpoint, initialize_trackpoint_fn);
 //    k_work_reschedule_for_queue(&trackpoint_work_q, &initialize_trackpoint, K_MSEC(2000));
     return 0;
