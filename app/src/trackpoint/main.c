@@ -16,12 +16,13 @@
 #define HIGH 1
 #define LOW 0
 
-int bitsToRead;
-uint16_t lastByte;
+uint8_t bitsToRead;
+uint64_t lastByte;
 uint8_t bit = 0x01;
 
 const struct device *gpiodev;
-static struct k_work_delayable initialize_trackpoint;
+static struct k_work initialize_trackpoint;
+static struct k_work read_result;
 
 static struct gpio_callback gpio_clk_ctx;
 
@@ -35,15 +36,12 @@ struct k_work_q *zmk_trackpoint_work_q() {
 static void handle_clk_int(const struct device *gpio,
                            struct gpio_callback *cb, uint32_t pins)
 {
-    if (bitsToRead != 0) {
+    if (bitsToRead > 0) {
         lastByte = lastByte << 1;
         if (gpio_pin_get_raw(gpio, TP_DAT_PIN) == HIGH) {
             lastByte = lastByte | bit;
         }
         bitsToRead--;
-    } else {
-        gpio_pin_set_raw(gpio, TP_CLK_PIN, 0);
-        printk("{%u}", (unsigned int)lastByte);
     }
 }
 
@@ -61,20 +59,26 @@ int read(uint8_t pin) {
 
 static void read_result_fn(struct k_work *work)
 {
-    printk("\n[TP] The last read byte was: 0x%x\n", lastByte);
+    uint8_t byte;
+    printk("\n[TP] The last read bytes were:\n");
+    while(lastByte) {
+        byte = lastByte >> 2 & 0xFF;
+        lastByte = lastByte >> 11;
+        printk("\n[TP] 0x%x\n", byte);
+    }
 }
 
 static void initialize_trackpoint_fn(struct k_work *work)
 {
-    gpio_pin_interrupt_configure(gpiodev, TP_CLK_PIN, GPIO_INT_EDGE_TO_INACTIVE);
-    // Sleep for a little while
-    k_sleep(K_MSEC(50));
     // Continue
+    k_sleep(K_MSEC(2000));
     gpio_pin_set(gpiodev, TP_RST_PIN, LOW);
-    bitsToRead = 11;
+    bitsToRead = 22;
     gohi(TP_CLK_PIN);
     gohi(TP_DAT_PIN);
-    // My expectation is that the TP will now send me data...but it doesn't work
+    k_sleep(K_MSEC(1000));
+    k_work_init_delayable(&read_result, read_result_fn);
+    k_work_reschedule_for_queue(&trackpoint_work_q, &read_result, K_MSEC(50));
 }
 
 int zmk_trackpoint_init() {
@@ -90,6 +94,7 @@ int zmk_trackpoint_init() {
     // Initialize gpio callbacks
     gpio_init_callback(&gpio_clk_ctx, handle_clk_int, BIT(TP_CLK_PIN));
     gpio_add_callback(gpiodev, &gpio_clk_ctx);
+    gpio_pin_interrupt_configure(gpiodev, TP_CLK_PIN, GPIO_INT_EDGE_TO_INACTIVE);
     // Start Trackpoint work
     k_work_init_delayable(&initialize_trackpoint, initialize_trackpoint_fn);
     k_work_reschedule_for_queue(&trackpoint_work_q, &initialize_trackpoint, K_MSEC(2000));
