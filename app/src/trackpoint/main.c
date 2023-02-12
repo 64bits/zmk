@@ -37,13 +37,20 @@ struct k_work_q *zmk_trackpoint_work_q() {
 static void handle_clk_int(const struct device *gpio,
                            struct gpio_callback *cb, uint32_t pins)
 {
+    lastByte = lastByte | bit;
     lastByte = lastByte << 1;
 }
 
 static void handle_dat_int(const struct device *gpio,
                            struct gpio_callback *cb, uint32_t pins)
 {
-    lastByte = lastByte | gpio_pin_get_raw(gpio, TP_DAT_PIN);
+    if (bit) {
+        bit = 0;
+        gpio_pin_interrupt_configure(gpiodev, TP_DAT_PIN, GPIO_INT_EDGE_TO_ACTIVE);
+    } else {
+        bit = 1;
+        gpio_pin_interrupt_configure(gpiodev, TP_DAT_PIN, GPIO_INT_EDGE_TO_INACTIVE);
+    }
 }
 
 void gohi(uint8_t pin) {
@@ -155,7 +162,7 @@ int zmk_trackpoint_init() {
     gpio_add_callback(gpiodev, &gpio_dat_ctx);
     gpio_add_callback(gpiodev, &gpio_clk_ctx);
     gpio_pin_interrupt_configure(gpiodev, TP_CLK_PIN, GPIO_INT_EDGE_TO_INACTIVE);
-    gpio_pin_interrupt_configure(gpiodev, TP_DAT_PIN, GPIO_INT_EDGE_BOTH);
+    gpio_pin_interrupt_configure(gpiodev, TP_DAT_PIN, GPIO_INT_EDGE_TO_INACTIVE);
     // Start Trackpoint work
     k_sleep(K_MSEC(2000));
     gpio_pin_set(gpiodev, TP_RST_PIN, LOW);
