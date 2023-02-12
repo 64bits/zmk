@@ -16,19 +16,12 @@
 #define HIGH 1
 #define LOW 0
 
-K_MUTEX_DEFINE(clock_mutex);
-K_CONDVAR_DEFINE(clock_low);
-K_CONDVAR_DEFINE(clock_high);
-
-struct DataReport {
-    uint8_t state;
-    int8_t x;
-    int8_t y;
-} dataReport;
+int bitsToRead;
+uint16_t lastByte;
+uint8_t bit = 0x01;
 
 const struct device *gpiodev;
 static struct k_work_delayable initialize_trackpoint;
-static struct k_work_delayable poll_trackpoint;
 
 static struct gpio_callback gpio_clk_ctx;
 
@@ -40,11 +33,18 @@ struct k_work_q *zmk_trackpoint_work_q() {
 }
 
 static void handle_clk_int(const struct device *gpio,
-                         struct gpio_callback *cb, uint32_t pins)
+                           struct gpio_callback *cb, uint32_t pins)
 {
-    k_mutex_lock(&clock_mutex, K_FOREVER);
-    k_condvar_signal(&clock_low);
-    k_mutex_unlock(&clock_mutex);
+    if (bitsToRead != 0) {
+        lastByte = lastByte << 1;
+        if (gpio_pin_get_raw(gpio, TP_DAT_PIN) == HIGH) {
+            lastByte = lastByte | bit;
+        }
+        bitsToRead--;
+    } else {
+        gpio_pin_set_raw(gpio, TP_CLK_PIN, 0);
+        printk("{%u}", (unsigned int)lastByte);
+    }
 }
 
 void gohi(uint8_t pin) {
@@ -55,121 +55,26 @@ void golo(uint8_t pin) {
     gpio_pin_set_raw(gpiodev, pin, 0);
 }
 
-int readPin(uint8_t pin) {
-    return gpio_pin_get(gpiodev, pin);
+int read(uint8_t pin) {
+    return gpio_pin_get_raw(gpiodev, pin);
 }
 
-void write(uint8_t data) {
-    uint8_t i;
-    uint8_t parity = 1;
-
-    gohi(TP_DAT_PIN);
-    gohi(TP_CLK_PIN);
-    k_sleep(K_USEC(300));
-    golo(TP_CLK_PIN);
-    k_sleep(K_USEC(300));
-    golo(TP_DAT_PIN);
-    k_sleep(K_USEC(10));
-    gohi(TP_CLK_PIN);	// start bit
-    /* wait for device to take control of clock */
-    gpio_pin_interrupt_configure(gpiodev, TP_CLK_PIN, GPIO_INT_EDGE_TO_INACTIVE);
-    k_mutex_lock(&clock_mutex, K_FOREVER);
-    k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
-    // clear to send data
-    for (i=0; i < 8; i++)
-    {
-        // wait for clock
-        if (data & 0x01)
-        {
-            gohi(TP_DAT_PIN);
-        } else {
-            golo(TP_DAT_PIN);
-        }
-        k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
-        parity = parity ^ (data & 0x01);
-        data = data >> 1;
-    }
-    // parity bit
-    if (parity)
-    {
-        gohi(TP_DAT_PIN);
-    } else {
-        golo(TP_DAT_PIN);
-    }
-    // clock cycle - like ack.
-    k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
-    // stop bit
-    gohi(TP_DAT_PIN);
-    k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
-    gpio_pin_interrupt_configure(gpiodev, TP_CLK_PIN, GPIO_INT_DISABLE);
-    k_mutex_unlock(&clock_mutex);
-    // mode switch
-//    while ((readPin(TP_CLK_PIN) == LOW) || (readPin(TP_DAT_PIN) == LOW))
-//        ;
-    // hold up incoming data
-    golo(TP_CLK_PIN);
-}
-
-uint8_t read(void) {
-    k_sleep(K_MSEC(1));
-    uint8_t data = 0x00;
-    uint8_t i;
-    uint8_t bit = 0x01;
-    // start clock
-    gohi(TP_CLK_PIN);
-    gohi(TP_DAT_PIN);
-    gpio_pin_interrupt_configure(gpiodev, TP_CLK_PIN, GPIO_INT_EDGE_TO_INACTIVE);
-    k_mutex_lock(&clock_mutex, K_FOREVER);
-    for (i = 0; i < 10; i++) {
-        k_condvar_wait(&clock_low, &clock_mutex, K_FOREVER);
-        if(i < 1 || i > 8) continue;
-        if (readPin(TP_DAT_PIN) == HIGH) {
-            data = data | bit;
-        }
-        bit = bit << 1;
-    }
-    gpio_pin_interrupt_configure(gpiodev, TP_CLK_PIN, GPIO_INT_DISABLE);
-    k_mutex_unlock(&clock_mutex);
-    golo(TP_CLK_PIN);  // hold incoming data
-    return data;
-}
-
-static void poll_trackpoint_fn(struct k_work *work)
+static void read_result_fn(struct k_work *work)
 {
-    dataReport.x = 0;
-    dataReport.y = 0;
-    write(0xeb);
-    uint8_t res = read();
-    printk("\n[TP] 0xeb ack: 0x%x\n", res);
-    if(0xfa == res) {
-        dataReport.state = read();
-        dataReport.x = read();
-        dataReport.y = read();
-        printk("\n[TP] The state is %d, %d, %d.\n", dataReport.state, dataReport.x, dataReport.y);
-//        zmk_hid_mouse_movement_set(0, 0);
-//        zmk_hid_mouse_scroll_set(0, 0);
-//        zmk_hid_mouse_movement_update(CLAMP(dataReport.x, INT8_MIN, INT8_MAX),
-//                                      CLAMP(-dataReport.y, INT8_MIN, INT8_MAX));
-//        zmk_endpoints_send_mouse_report();
-    }
-    k_work_reschedule_for_queue(&trackpoint_work_q, work, K_MSEC(50));
+    printk("\n[TP] The last read byte was: 0x%x\n", lastByte);
 }
 
 static void initialize_trackpoint_fn(struct k_work *work)
 {
-    uint8_t code;
-    // Running this _with_ remote mode crashes things :(
+    gpio_pin_interrupt_configure(gpiodev, TP_CLK_PIN, GPIO_INT_EDGE_TO_INACTIVE);
+    // Sleep for a little while
+    k_sleep(K_MSEC(50));
+    // Continue
     gpio_pin_set(gpiodev, TP_RST_PIN, LOW);
-//    write(0xff);
-//    printk("\n[TP] Init ack: 0x%x\n", read());
-//    printk("\n[TP] Init byte1: 0x%x\n", read());
-//    printk("\n[TP] Init byte2: 0x%x\n", read());
-    printk("\nSetting remote mode\n");
-    write(0xf0); // Set remote mode
-    printk("\n[TP] Wrote\n");
-    printk("\n[TP] Set remote mode response: 0x%x", read());
-    k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
-    k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
+    bitsToRead = 11;
+    gohi(TP_CLK_PIN);
+    gohi(TP_DAT_PIN);
+    // My expectation is that the TP will now send me data...but it doesn't work
 }
 
 int zmk_trackpoint_init() {
@@ -179,9 +84,9 @@ int zmk_trackpoint_init() {
     gpio_pin_configure(gpiodev, TP_RST_PIN, GPIO_OUTPUT);
     gpio_pin_set(gpiodev, TP_RST_PIN, HIGH);
     k_work_queue_start(&trackpoint_work_q, trackpoint_work_stack_area,
-                   K_THREAD_STACK_SIZEOF(trackpoint_work_stack_area),
-                   CONFIG_SYSTEM_WORKQUEUE_PRIORITY,
-                   NULL);
+                       K_THREAD_STACK_SIZEOF(trackpoint_work_stack_area),
+                       CONFIG_SYSTEM_WORKQUEUE_PRIORITY,
+                       NULL);
     // Initialize gpio callbacks
     gpio_init_callback(&gpio_clk_ctx, handle_clk_int, BIT(TP_CLK_PIN));
     gpio_add_callback(gpiodev, &gpio_clk_ctx);
