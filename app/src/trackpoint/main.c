@@ -31,7 +31,6 @@ struct DataReport {
 
 const struct device *gpiodev;
 static struct k_work_delayable initialize_trackpoint;
-static struct k_work_delayable some_work;
 static struct k_work_delayable poll_trackpoint;
 
 static struct gpio_callback gpio_read_ctx;
@@ -192,12 +191,6 @@ static void initialize_trackpoint_fn(struct k_work *work)
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
 }
 
-static void some_work_fn(struct k_work *work)
-{
-    gpio_pin_toggle(gpiodev, TP_DAT_PIN);
-    k_work_reschedule_for_queue(&trackpoint_work_q, work, K_MSEC(500));
-}
-
 int zmk_trackpoint_init() {
     gpiodev = device_get_binding("GPIO_1");
     gpio_pin_configure(gpiodev, TP_CLK_PIN, GPIO_INPUT | GPIO_OUTPUT_HIGH );
@@ -214,8 +207,5 @@ int zmk_trackpoint_init() {
     // FOR TRACKPOINT
     k_work_init_delayable(&initialize_trackpoint, initialize_trackpoint_fn);
     k_work_reschedule_for_queue(&trackpoint_work_q, &initialize_trackpoint, K_MSEC(2000));
-    // FOR LED
-//    k_work_init_delayable(&some_work, some_work_fn);
-//    k_work_reschedule_for_queue(&trackpoint_work_q, &some_work, K_MSEC(500));
     return 0;
 }
