@@ -158,7 +158,7 @@ static void poll_trackpoint_fn(struct k_work *work)
     currentBytes = 0;
     gpio_pin_set(gpiodev, TP_CLK_PIN, HIGH);
     gpio_pin_set(gpiodev, TP_DAT_PIN, HIGH);
-    k_sleep(K_MSEC(60));
+    k_sleep(K_MSEC(5)); // Reset takes ~60
     zmk_hid_mouse_movement_set(0, 0);
     zmk_hid_mouse_scroll_set(0, 0);
     zmk_hid_mouse_movement_update(CLAMP(readByte(1), INT8_MIN, INT8_MAX),
