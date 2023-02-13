@@ -197,6 +197,16 @@ int zmk_trackpoint_init() {
     // Start Trackpoint work
     k_sleep(K_MSEC(500));
     gpio_pin_set_dt(&tp_rst, LOW);
+    // Set sensitivity
+    write(0xe2);
+    k_sleep(K_MSEC(5));
+    write(0x81);
+    k_sleep(K_MSEC(5));
+    write(0x4a);
+    k_sleep(K_MSEC(5));
+    write(0xc0);
+    k_sleep(K_MSEC(5));
+    // Let's go
     k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
     return 0;
