@@ -25,8 +25,6 @@ uint64_t currentBytes;
 uint8_t bit = 0x01;
 uint16_t transmit;
 
-const struct device *gpiodev;
-
 static struct k_work initialize_trackpoint;
 static struct k_work_delayable poll_trackpoint;
 
@@ -176,7 +174,8 @@ static void poll_trackpoint_fn(struct k_work *work)
 }
 
 int zmk_trackpoint_init() {
-    gpiodev = device_get_binding("GPIO_1");
+    printk("\nTrackpoint called\n");
+    printk("\nThe pins are %d, %d, and %d\n", tp_dat.pin, tp_clk.pin, tp_rst.pin);
     gpio_pin_configure_dt(&tp_clk, GPIO_INPUT | GPIO_OUTPUT_HIGH );
     gpio_pin_configure_dt(&tp_dat, GPIO_INPUT | GPIO_OUTPUT_HIGH );
     gpio_pin_configure_dt(&tp_rst, GPIO_OUTPUT);
