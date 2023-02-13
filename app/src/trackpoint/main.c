@@ -58,7 +58,6 @@ static void handle_clk_hi_int(const struct device *gpio,
 {
     k_mutex_lock(&transmission, K_FOREVER);
     if(transmit > 0) {
-        LOG_INF("{%d}", (transmit & 1) ? 1 : 0);
         gpio_pin_set_dt(&tp_dat, (transmit & 1) ? 1 : 0);
         transmit = transmit >> 1;
     } else {
@@ -126,7 +125,6 @@ void write(uint8_t data) {
     // Switch modes
     k_mutex_lock(&transmission, K_FOREVER);
     set_gpio_mode(WRITE);
-    LOG_INF("Mode is write");
     go_lo(&tp_dat);
     // Block on condition of transmission end
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
@@ -168,9 +166,7 @@ static void poll_trackpoint_fn(struct k_work *work)
     write(0xeb);
     k_sleep(K_MSEC(1)); // Post-write wait?
     currentBytes = 0;
-    // TODO: Are these necessary? Write should reset them at its end?
-    gpio_pin_set_dt(&tp_clk, HIGH);
-    gpio_pin_set_dt(&tp_dat, HIGH);
+    // TODO: Don't rely on sleep, use a condition variable
     k_sleep(K_MSEC(5)); // Reset takes ~60, but poll is fast
     zmk_hid_mouse_movement_set(0, 0);
     zmk_hid_mouse_scroll_set(0, 0);
@@ -198,10 +194,8 @@ int zmk_trackpoint_init() {
     gpio_init_callback(&gpio_write_clk_ctx, handle_clk_hi_int, BIT(tp_clk.pin));
     set_gpio_mode(READ);
     // Start Trackpoint work
-    // TODO: Can reduce these times quite a bit
-    k_sleep(K_MSEC(2000));
+    k_sleep(K_MSEC(500));
     gpio_pin_set_dt(&tp_rst, LOW);
-    k_sleep(K_MSEC(1000)); // TODO: Is this needed at all?
     k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
     return 0;
