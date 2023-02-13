@@ -12,19 +12,20 @@
 #include <zmk/endpoints.h>
 #include <inttypes.h>
 
-static const struct gpio_dt_spec tp_dat = GPIO_DT_SPEC_GET_BY_IDX(DT_N_S_buttons_S_button_0, gpios, 0);
-static const struct gpio_dt_spec tp_clk = GPIO_DT_SPEC_GET_BY_IDX(DT_N_S_buttons_S_button_0, gpios, 1);
-static const struct gpio_dt_spec tp_rst = GPIO_DT_SPEC_GET_BY_IDX(DT_N_S_buttons_S_button_0, gpios, 2);
 #define READ 0
 #define WRITE 1
 #define HIGH 1
 #define LOW 0
 
+static struct gpio_dt_spec tp_dat = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0), gpios, 0);
+static struct gpio_dt_spec tp_clk = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0), gpios, 1);
+static struct gpio_dt_spec tp_rst = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0), gpios, 2);
+
 uint64_t currentBytes;
 uint8_t bit = 0x01;
 uint16_t transmit;
 
-static struct k_work initialize_trackpoint;
+static struct k_work_delayable initialize_trackpoint;
 static struct k_work_delayable poll_trackpoint;
 
 K_MUTEX_DEFINE(transmission);
