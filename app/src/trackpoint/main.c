@@ -4,18 +4,17 @@
  * CLK and DAT lines are held high when idle, always allowing TP to send
  * in data, though it should only do that in response to commands
  */
-
+#include <devicetree.h>
 #include <kernel.h>
-#include <zmk/trackpoint.h>
 #include <drivers/gpio.h>
+#include <zmk/trackpoint.h>
 #include <zmk/hid.h>
 #include <zmk/endpoints.h>
 #include <inttypes.h>
 
-#define TP0 DT_INST(0, ibm_trackpoint)
-static const struct gpio_dt_spec tp_dat = GPIO_DT_SPEC_GET_BY_IDX(TP0, gpios, 0);
-static const struct gpio_dt_spec tp_clk = GPIO_DT_SPEC_GET_BY_IDX(TP0, gpios, 1);
-static const struct gpio_dt_spec tp_rst = GPIO_DT_SPEC_GET_BY_IDX(TP0, gpios, 2);
+static const struct gpio_dt_spec tp_dat = GPIO_DT_SPEC_GET_BY_IDX(DT_N_S_buttons_S_button_0, gpios, 0);
+static const struct gpio_dt_spec tp_clk = GPIO_DT_SPEC_GET_BY_IDX(DT_N_S_buttons_S_button_0, gpios, 1);
+static const struct gpio_dt_spec tp_rst = GPIO_DT_SPEC_GET_BY_IDX(DT_N_S_buttons_S_button_0, gpios, 2);
 #define READ 0
 #define WRITE 1
 #define HIGH 1

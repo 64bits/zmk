@@ -40,10 +40,5 @@ void main(void) {
     zmk_mouse_init();
 #endif /* CONFIG_ZMK_MOUSE */
 
-    if(DT_NODE_EXISTS(DT_INST(0, ibm_trackpoint))) {
-        printk("\nTrackpoint exists\n");
-    } else {
-        printk("\nTrackpoint exists\n");
-    }
     zmk_trackpoint_init();
 }

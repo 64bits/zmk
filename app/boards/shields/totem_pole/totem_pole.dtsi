@@ -28,7 +28,6 @@
         >;
     };
 
-
     kscan0: kscan_0 {
         compatible = "zmk,kscan-gpio-matrix";
         label = "KSCAN";
@@ -40,5 +39,16 @@
             , <&xiao_d 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
             , <&xiao_d 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
             ;
+    };
+
+    buttons {
+        compatible = "gpio-keys";
+        button0: button_0 {
+            gpios
+                = <&gpio1 14 0>
+                , <&gpio1 13 0>
+                , <&gpio1 15 0>;
+            label = "data, clk, rst";
+        };
     };
 };
