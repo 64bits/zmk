@@ -40,6 +40,5 @@ void main(void) {
     zmk_mouse_init();
 #endif /* CONFIG_ZMK_MOUSE */
 
-    printk("\nTrackpoint gonna be called\n");
     zmk_trackpoint_init();
 }
