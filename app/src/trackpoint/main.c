@@ -17,15 +17,13 @@
 #define HIGH 1
 #define LOW 0
 
-uint8_t bitsToRead;
 uint64_t currentBytes;
 uint8_t bit = 0x01;
 
-static struct k_work_delayable poll_trackpoint;
-
 const struct device *gpiodev;
+
 static struct k_work initialize_trackpoint;
-static struct k_work read_result;
+static struct k_work_delayable poll_trackpoint;
 
 static struct gpio_callback gpio_clk_ctx;
 static struct gpio_callback gpio_dat_ctx;
@@ -159,12 +157,12 @@ static void poll_trackpoint_fn(struct k_work *work)
     gpio_pin_set(gpiodev, TP_CLK_PIN, HIGH);
     gpio_pin_set(gpiodev, TP_DAT_PIN, HIGH);
     k_sleep(K_MSEC(5)); // Reset takes ~60
-    zmk_hid_mouse_movement_set(0, 0);
-    zmk_hid_mouse_scroll_set(0, 0);
-    zmk_hid_mouse_movement_update(CLAMP(readByte(1), INT8_MIN, INT8_MAX),
-                                  CLAMP(-readByte(0), INT8_MIN, INT8_MAX));
-    zmk_endpoints_send_mouse_report();
-    //printAllBytes();
+     zmk_hid_mouse_movement_set(0, 0);
+     zmk_hid_mouse_scroll_set(0, 0);
+     zmk_hid_mouse_movement_update(CLAMP(readByte(1), INT8_MIN, INT8_MAX),
+                                   CLAMP(-readByte(0), INT8_MIN, INT8_MAX));
+     zmk_endpoints_send_mouse_report();
+    printAllBytes();
     k_work_reschedule_for_queue(&trackpoint_work_q, work, K_MSEC(50));
 }
 
