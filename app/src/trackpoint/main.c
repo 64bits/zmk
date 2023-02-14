@@ -14,6 +14,8 @@
 #include <logging/log.h>
 LOG_MODULE_REGISTER(trackpoint);
 
+#define POLL_TTL 750
+
 #define READ 0
 #define WRITE 1
 #define SLEEP 2
@@ -25,9 +27,7 @@ static struct gpio_dt_spec tp_dat = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0
 static struct gpio_dt_spec tp_clk = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0), gpios, 1);
 static struct gpio_dt_spec tp_rst = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0), gpios, 2);
 
-struct k_timer trackpoint_timer;
-
-k_timer_init(&my_timer, my_expiry_function, NULL);
+K_TIMER_DEFINE(poll_timer, NULL, NULL);
 
 uint8_t bit = 0x01; // TODO: Remove?
 uint8_t to_read;
@@ -72,13 +72,6 @@ static void handle_clk_lo_write_int(const struct device *gpio,
     k_mutex_unlock(&transmission);
 }
 
-static void handle_clk_lo_sleep_int(const struct device *gpio,
-                                    struct gpio_callback *cb, uint32_t pins)
-{
-    // Interrupted while sleeping...let's begin the polling
-    k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
-}
-
 static void handle_dat_int(const struct device *gpio,
                            struct gpio_callback *cb, uint32_t pins)
 {
@@ -121,13 +114,13 @@ int read(const struct gpio_dt_spec* spec) {
     return gpio_pin_get_dt(spec);
 }
 
-void count_read_bytes() {
+static void count_read_bytes_fn(struct k_work *work) {
     if(--to_read == 0) {
         k_mutex_unlock(&transmission);
     }
 }
 
-void write(uint8_t data, uint8_t num_response_bits) {
+uint64_t write(uint8_t data, uint8_t num_response_bits) {
     uint64_t result;
     // Prepare the bits to be sent
     uint16_t bits;
@@ -164,6 +157,15 @@ void write(uint8_t data, uint8_t num_response_bits) {
     return result;
 }
 
+static void handle_clk_lo_sleep_int(const struct device *gpio,
+                                    struct gpio_callback *cb, uint32_t pins)
+{
+    // Interrupted while sleeping...let's begin the polling
+    write(0xf5, 11); // Disable stream mode
+    k_timer_start(&poll_timer, K_MSEC(POLL_TTL), K_NO_WAIT);
+    k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
+}
+
 int8_t bit_reverse(int8_t num) {
     return ((num & 0x01) << 7)
     | ((num & 0x02) << 5)
@@ -175,20 +177,16 @@ int8_t bit_reverse(int8_t num) {
     | ((num & 0x80) >> 7);
 }
 
-int8_t read_byte_at_idx(int8_t index) {
-    return bit_reverse((current_bytes >> (3+index*11)) & 0xFF);
+int8_t byte_at_idx(uint64_t list, int8_t index) {
+    return bit_reverse((list >> (3+index*11)) & 0xFF);
 }
 
 void set_sensitivity(uint8_t sens) {
     // Set sensitivity
-    write(0xe2);
-    k_sleep(K_MSEC(5));
-    write(0x81);
-    k_sleep(K_MSEC(5));
-    write(0x4a);
-    k_sleep(K_MSEC(5));
-    write(sens);
-    k_sleep(K_MSEC(5));
+    write(0xe2, 11);
+    write(0x81, 11);
+    write(0x4a, 11);
+    write(sens, 11);
 }
 
 void print_all_bytes()
@@ -202,25 +200,33 @@ void print_all_bytes()
     LOG_INF("third byte = 0x%x\n\n", thirdByte);
 }
 
-void on_timer_expire(struct k_timer *timer_id) {
-
-}
-
+uint64_t res;
+int16_t x_delta;
+int16_t y_delta;
 static void poll_trackpoint_fn(struct k_work *work)
 {
     // TODO: Check timer expiry etc.
     // TODO: Don't update position when either one is 0 (help with noise)
-    write(0xeb);
-    k_sleep(K_MSEC(1)); // Post-write wait?
-    current_bytes = 0;
-    k_sleep(K_MSEC(5)); // Reset takes ~60, but poll is fast
-    zmk_hid_mouse_movement_set(0, 0);
-    zmk_hid_mouse_scroll_set(0, 0);
-    zmk_hid_mouse_movement_update(CLAMP(read_byte_at_idx(1), INT8_MIN, INT8_MAX),
-                               CLAMP(-read_byte_at_idx(0), INT8_MIN, INT8_MAX));
-    zmk_endpoints_send_mouse_report();
-    print_all_bytes();
-    k_work_reschedule_for_queue(&trackpoint_work_q, work, K_MSEC(50));
+    res = write(0xeb, 44);
+    x_delta = byte_at_idx(res, 1);
+    y_delta = -byte_at_idx(res, 0);
+    // If either value is exactly zero, it's probably drift
+    if(x_delta !=0 && y_delta !=0) {
+        zmk_hid_mouse_movement_set(0, 0);
+        zmk_hid_mouse_scroll_set(0, 0);
+        zmk_hid_mouse_movement_update(CLAMP(x_delta, INT8_MIN, INT8_MAX),
+                                      CLAMP(y_delta, INT8_MIN, INT8_MAX));
+        zmk_endpoints_send_mouse_report();
+        // If the mouse was moved, we restart the timer
+        k_timer_start(&poll_timer, K_MSEC(POLL_TTL), K_NO_WAIT);
+    }
+    if(k_timer_status_get(&poll_timer) < 0) {
+        // If the timer hasn't expired, continue polling
+        k_work_reschedule_for_queue(&trackpoint_work_q, work, K_MSEC(50));
+    } else {
+        write(0xf4, 11); // Enable stream mode
+        set_gpio_mode(SLEEP);
+    }
 }
 
 int zmk_trackpoint_init() {
@@ -245,13 +251,9 @@ int zmk_trackpoint_init() {
     // Set sensitivity
     set_sensitivity(0xc0);
     // Let's go
-    k_timer_init(&trackpoint_timer, on_timer_expire, NULL);
     k_work_init_delayable(&count_read_bytes, count_read_bytes_fn);
     k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
-    k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
-    // In sleep mode, interrupts are used to activate the polling function until
-    // such a time as when the timer used therein (which is reset upon activity)
-    // expires -- this should help save on battery
-    // set_gpio_mode(SLEEP);
+    write(0xf4, 11); // Enable stream mode
+    set_gpio_mode(SLEEP);
     return 0;
 }
