@@ -122,14 +122,18 @@ int read(const struct gpio_dt_spec* spec) {
 }
 
 static void count_read_bytes_fn(struct k_work *work) {
-    if(--to_read == 0) {
-        k_mutex_unlock(&transmission);
+    k_mutex_lock(&transmission, K_FOREVER);
+    if(--to_read <= 0) {
+        k_condvar_signal(&transmission_end);
     }
     LOG_INF("\nRemaining to read %d\n", to_read);
+    k_mutex_unlock(&transmission);
 }
 
 uint64_t write(uint8_t data, uint8_t num_response_bits) {
+    k_sleep(K_MSEC(2000));
     LOG_INF("\nWriting %x\n", data);
+    k_sleep(K_MSEC(2000));
 
     uint64_t result;
     // Prepare the bits to be sent
@@ -243,7 +247,7 @@ static void poll_trackpoint_fn(struct k_work *work)
 int zmk_trackpoint_init() {
     LOG_INF("\nTrackpoint called\n");
     LOG_INF("\nThe pins are %d, %d, and %d\n", tp_dat.pin, tp_clk.pin, tp_rst.pin);
-    gpio_pin_configure_dt(&tp_clk, GPIO_INPUT | GPIO_OUTPUT_HIGH );
+    gpio_pin_configure_dt(&tp_clk, GPIO_INPUT | GPIO_OUTPUT_LOW );
     gpio_pin_configure_dt(&tp_dat, GPIO_INPUT | GPIO_OUTPUT_HIGH );
     gpio_pin_configure_dt(&tp_rst, GPIO_OUTPUT);
     gpio_pin_set_dt(&tp_rst, HIGH);
@@ -256,7 +260,6 @@ int zmk_trackpoint_init() {
     gpio_init_callback(&gpio_read_clk_ctx, handle_clk_lo_read_int, BIT(tp_clk.pin));
     gpio_init_callback(&gpio_write_clk_ctx, handle_clk_lo_write_int, BIT(tp_clk.pin));
     gpio_init_callback(&gpio_sleep_clk_ctx, handle_clk_lo_sleep_int, BIT(tp_clk.pin));
-    set_gpio_mode(READ);
     // Start Trackpoint work
     k_sleep(K_MSEC(500));
     gpio_pin_set_dt(&tp_rst, LOW);
