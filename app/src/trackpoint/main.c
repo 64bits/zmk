@@ -45,7 +45,7 @@ struct k_work_q *zmk_trackpoint_work_q() {
     return &trackpoint_work_q;
 }
 
-static void handle_clk_lo_int(const struct device *gpio,
+static void handle_clk_lo_read_int(const struct device *gpio,
                            struct gpio_callback *cb, uint32_t pins)
 {
     current_bytes = current_bytes | bit;
@@ -53,7 +53,7 @@ static void handle_clk_lo_int(const struct device *gpio,
 }
 
 // TODO: Fix the name, it's not correct, we write on clock LOW
-static void handle_clk_hi_int(const struct device *gpio,
+static void handle_clk_lo_write_int(const struct device *gpio,
                               struct gpio_callback *cb, uint32_t pins)
 {
     k_mutex_lock(&transmission, K_FOREVER);
@@ -202,8 +202,8 @@ int zmk_trackpoint_init() {
                        NULL);
     // Initialize gpio callbacks
     gpio_init_callback(&gpio_read_dat_ctx, handle_dat_int, BIT(tp_dat.pin));
-    gpio_init_callback(&gpio_read_clk_ctx, handle_clk_lo_int, BIT(tp_clk.pin));
-    gpio_init_callback(&gpio_write_clk_ctx, handle_clk_hi_int, BIT(tp_clk.pin));
+    gpio_init_callback(&gpio_read_clk_ctx, handle_clk_lo_read_int, BIT(tp_clk.pin));
+    gpio_init_callback(&gpio_write_clk_ctx, handle_clk_lo_write_int, BIT(tp_clk.pin));
     set_gpio_mode(READ);
     // Start Trackpoint work
     k_sleep(K_MSEC(500));
@@ -213,5 +213,9 @@ int zmk_trackpoint_init() {
     // Let's go
     k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
+    // In sleep mode, interrupts are used to activate the polling function until
+    // such a time as when the timer used therein (which is reset upon activity)
+    // expires -- this should help save on battery
+    // set_gpio_mode(SLEEP);
     return 0;
 }
