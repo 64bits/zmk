@@ -260,14 +260,14 @@ int zmk_trackpoint_init() {
     gpio_init_callback(&gpio_read_clk_ctx, handle_clk_lo_read_int, BIT(tp_clk.pin));
     gpio_init_callback(&gpio_write_clk_ctx, handle_clk_lo_write_int, BIT(tp_clk.pin));
     gpio_init_callback(&gpio_sleep_clk_ctx, handle_clk_lo_sleep_int, BIT(tp_clk.pin));
+    k_work_init_delayable(&count_read_bytes, count_read_bytes_fn);
+    k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
     // Start Trackpoint work
     k_sleep(K_MSEC(500));
     gpio_pin_set_dt(&tp_rst, LOW);
     // Set sensitivity
     set_sensitivity(0xc0);
     // Let's go
-    k_work_init_delayable(&count_read_bytes, count_read_bytes_fn);
-    k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
     write(0xf4, 11); // Enable stream mode
     set_gpio_mode(SLEEP);
     return 0;
