@@ -16,6 +16,7 @@ LOG_MODULE_REGISTER(trackpoint);
 
 #define READ 0
 #define WRITE 1
+#define SLEEP 2
 #define HIGH 1
 #define LOW 0
 
@@ -23,6 +24,10 @@ LOG_MODULE_REGISTER(trackpoint);
 static struct gpio_dt_spec tp_dat = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0), gpios, 0);
 static struct gpio_dt_spec tp_clk = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0), gpios, 1);
 static struct gpio_dt_spec tp_rst = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0), gpios, 2);
+
+struct k_timer trackpoint_timer;
+
+k_timer_init(&my_timer, my_expiry_function, NULL);
 
 uint8_t bit = 0x01; // TODO: Remove?
 uint64_t current_bytes;
@@ -48,11 +53,11 @@ struct k_work_q *zmk_trackpoint_work_q() {
 static void handle_clk_lo_read_int(const struct device *gpio,
                            struct gpio_callback *cb, uint32_t pins)
 {
+    // TODO: Could potentially use k_work_submit to handle whether enough bits got read
     current_bytes = current_bytes | bit;
     current_bytes = current_bytes << 1;
 }
 
-// TODO: Fix the name, it's not correct, we write on clock LOW
 static void handle_clk_lo_write_int(const struct device *gpio,
                               struct gpio_callback *cb, uint32_t pins)
 {
@@ -64,6 +69,13 @@ static void handle_clk_lo_write_int(const struct device *gpio,
         k_condvar_signal(&transmission_end);
     }
     k_mutex_unlock(&transmission);
+}
+
+static void handle_clk_lo_sleep_int(const struct device *gpio,
+                                    struct gpio_callback *cb, uint32_t pins)
+{
+    // Interrupted while sleeping...let's begin the polling
+    k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
 }
 
 static void handle_dat_int(const struct device *gpio,
@@ -79,18 +91,20 @@ static void handle_dat_int(const struct device *gpio,
 }
 
 void set_gpio_mode(uint8_t mode) {
+    gpio_remove_callback(tp_clk.port, &gpio_write_clk_ctx);
+    gpio_remove_callback(tp_dat.port, &gpio_read_dat_ctx);
+    gpio_remove_callback(tp_clk.port, &gpio_read_clk_ctx);
+
     if(mode == WRITE) {
-        gpio_remove_callback(tp_dat.port, &gpio_read_dat_ctx);
-        gpio_remove_callback(tp_clk.port, &gpio_read_clk_ctx);
         gpio_add_callback(tp_clk.port, &gpio_write_clk_ctx);
         gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
         gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_DISABLE);
-    } else {
-        gpio_remove_callback(tp_clk.port, &gpio_write_clk_ctx);
+    } else if(mode == READ) {
         gpio_add_callback(tp_dat.port, &gpio_read_dat_ctx);
         gpio_add_callback(tp_clk.port, &gpio_read_clk_ctx);
         gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
         gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_EDGE_TO_INACTIVE);
+    } else {
     }
 }
 
@@ -173,8 +187,13 @@ void print_all_bytes()
     LOG_INF("third byte = 0x%x\n\n", thirdByte);
 }
 
+void on_timer_expire(struct k_timer *timer_id) {
+
+}
+
 static void poll_trackpoint_fn(struct k_work *work)
 {
+    // TODO: Check timer expiry etc.
     // TODO: Don't update position when either one is 0 (help with noise)
     write(0xeb);
     k_sleep(K_MSEC(1)); // Post-write wait?
@@ -211,6 +230,7 @@ int zmk_trackpoint_init() {
     // Set sensitivity
     set_sensitivity(0xc0);
     // Let's go
+    k_timer_init(&trackpoint_timer, on_timer_expire, NULL);
     k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
     // In sleep mode, interrupts are used to activate the polling function until
