@@ -150,6 +150,18 @@ int8_t read_byte_at_idx(int8_t index) {
     return bit_reverse((current_bytes >> (3+index*11)) & 0xFF);
 }
 
+void set_sensitivity(uint8_t sens) {
+    // Set sensitivity
+    write(0xe2);
+    k_sleep(K_MSEC(5));
+    write(0x81);
+    k_sleep(K_MSEC(5));
+    write(0x4a);
+    k_sleep(K_MSEC(5));
+    write(sens);
+    k_sleep(K_MSEC(5));
+}
+
 void print_all_bytes()
 {
     uint8_t firstByte = bit_reverse((current_bytes >> 3) & 0xFF);
@@ -178,7 +190,6 @@ static void poll_trackpoint_fn(struct k_work *work)
 }
 
 int zmk_trackpoint_init() {
-    // TODO: Also set sensitivity
     LOG_INF("\nTrackpoint called\n");
     LOG_INF("\nThe pins are %d, %d, and %d\n", tp_dat.pin, tp_clk.pin, tp_rst.pin);
     gpio_pin_configure_dt(&tp_clk, GPIO_INPUT | GPIO_OUTPUT_HIGH );
@@ -198,14 +209,7 @@ int zmk_trackpoint_init() {
     k_sleep(K_MSEC(500));
     gpio_pin_set_dt(&tp_rst, LOW);
     // Set sensitivity
-    write(0xe2);
-    k_sleep(K_MSEC(5));
-    write(0x81);
-    k_sleep(K_MSEC(5));
-    write(0x4a);
-    k_sleep(K_MSEC(5));
-    write(0xc0);
-    k_sleep(K_MSEC(5));
+    set_sensitivity(0xc0);
     // Let's go
     k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
