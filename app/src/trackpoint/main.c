@@ -30,11 +30,12 @@ struct k_timer trackpoint_timer;
 k_timer_init(&my_timer, my_expiry_function, NULL);
 
 uint8_t bit = 0x01; // TODO: Remove?
+uint8_t to_read;
 uint64_t current_bytes;
 uint16_t transmit;
 
-static struct k_work_delayable initialize_trackpoint;
 static struct k_work_delayable poll_trackpoint;
+static struct k_work count_read_bytes;
 
 K_MUTEX_DEFINE(transmission);
 K_CONDVAR_DEFINE(transmission_end);
@@ -53,9 +54,9 @@ struct k_work_q *zmk_trackpoint_work_q() {
 static void handle_clk_lo_read_int(const struct device *gpio,
                            struct gpio_callback *cb, uint32_t pins)
 {
-    // TODO: Could potentially use k_work_submit to handle whether enough bits got read
     current_bytes = current_bytes | bit;
     current_bytes = current_bytes << 1;
+    k_work_submit_to_queue(&trackpoint_work_q, &count_read_bytes);
 }
 
 static void handle_clk_lo_write_int(const struct device *gpio,
@@ -120,7 +121,14 @@ int read(const struct gpio_dt_spec* spec) {
     return gpio_pin_get_dt(spec);
 }
 
-void write(uint8_t data) {
+void count_read_bytes() {
+    if(--to_read == 0) {
+        k_mutex_unlock(&transmission);
+    }
+}
+
+void write(uint8_t data, uint8_t num_response_bits) {
+    uint64_t result;
     // Prepare the bits to be sent
     uint16_t bits;
     uint8_t parity = 1;
@@ -142,11 +150,18 @@ void write(uint8_t data) {
     go_lo(&tp_dat);
     // Block on condition of transmission end
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
-    set_gpio_mode(READ);
-    // Return clock and data to the high position
-    go_hi(&tp_clk);
+    // Inhibit the next transmission
+    go_lo(&tp_clk);
     go_hi(&tp_dat);
+    k_sleep(K_USEC(10));
+    to_read = num_response_bits;
+    set_gpio_mode(READ);
+    // Read until we have the number of bytes we wanted
+    k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
+    result = current_bytes;
     k_mutex_unlock(&transmission);
+    // Return the bytes we read as an int
+    return result;
 }
 
 int8_t bit_reverse(int8_t num) {
@@ -231,6 +246,7 @@ int zmk_trackpoint_init() {
     set_sensitivity(0xc0);
     // Let's go
     k_timer_init(&trackpoint_timer, on_timer_expire, NULL);
+    k_work_init_delayable(&count_read_bytes, count_read_bytes_fn);
     k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
     // In sleep mode, interrupts are used to activate the polling function until
