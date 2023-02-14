@@ -43,6 +43,7 @@ K_CONDVAR_DEFINE(transmission_end);
 static struct gpio_callback gpio_read_clk_ctx;
 static struct gpio_callback gpio_read_dat_ctx;
 static struct gpio_callback gpio_write_clk_ctx;
+static struct gpio_callback gpio_sleep_clk_ctx;
 
 K_THREAD_STACK_DEFINE(trackpoint_work_stack_area, 2048);
 static struct k_work_q trackpoint_work_q;
@@ -88,6 +89,9 @@ void set_gpio_mode(uint8_t mode) {
     gpio_remove_callback(tp_clk.port, &gpio_write_clk_ctx);
     gpio_remove_callback(tp_dat.port, &gpio_read_dat_ctx);
     gpio_remove_callback(tp_clk.port, &gpio_read_clk_ctx);
+    gpio_remove_callback(tp_clk.port, &gpio_sleep_clk_ctx);
+
+    LOG_INF("\nChanging mode to %d\n", mode);
 
     if(mode == WRITE) {
         gpio_add_callback(tp_clk.port, &gpio_write_clk_ctx);
@@ -99,6 +103,9 @@ void set_gpio_mode(uint8_t mode) {
         gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
         gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_EDGE_TO_INACTIVE);
     } else {
+        gpio_add_callback(tp_clk.port, &gpio_sleep_clk_ctx);
+        gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
+        gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_DISABLE);
     }
 }
 
@@ -118,9 +125,12 @@ static void count_read_bytes_fn(struct k_work *work) {
     if(--to_read == 0) {
         k_mutex_unlock(&transmission);
     }
+    LOG_INF("\nRemaining to read %d\n", to_read);
 }
 
 uint64_t write(uint8_t data, uint8_t num_response_bits) {
+    LOG_INF("\nWriting %x\n", data);
+
     uint64_t result;
     // Prepare the bits to be sent
     uint16_t bits;
@@ -149,6 +159,7 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
     k_sleep(K_USEC(10));
     to_read = num_response_bits;
     set_gpio_mode(READ);
+    go_hi(&tp_clk);
     // Read until we have the number of bytes we wanted
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
     result = current_bytes;
@@ -244,6 +255,7 @@ int zmk_trackpoint_init() {
     gpio_init_callback(&gpio_read_dat_ctx, handle_dat_int, BIT(tp_dat.pin));
     gpio_init_callback(&gpio_read_clk_ctx, handle_clk_lo_read_int, BIT(tp_clk.pin));
     gpio_init_callback(&gpio_write_clk_ctx, handle_clk_lo_write_int, BIT(tp_clk.pin));
+    gpio_init_callback(&gpio_sleep_clk_ctx, handle_clk_lo_sleep_int, BIT(tp_clk.pin));
     set_gpio_mode(READ);
     // Start Trackpoint work
     k_sleep(K_MSEC(500));
