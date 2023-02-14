@@ -63,14 +63,14 @@ static void handle_clk_lo_read_int(const struct device *gpio,
 static void handle_clk_lo_write_int(const struct device *gpio,
                               struct gpio_callback *cb, uint32_t pins)
 {
-    k_mutex_lock(&transmission, K_FOREVER);
     if(transmit > 0) {
         gpio_pin_set_dt(&tp_dat, (transmit & 1) ? 1 : 0);
         transmit = transmit >> 1;
     } else {
+        k_mutex_lock(&transmission, K_FOREVER);
         k_condvar_signal(&transmission_end);
+        k_mutex_unlock(&transmission);
     }
-    k_mutex_unlock(&transmission);
 }
 
 static void handle_dat_int(const struct device *gpio,
@@ -122,18 +122,16 @@ int read(const struct gpio_dt_spec* spec) {
 }
 
 static void count_read_bytes_fn(struct k_work *work) {
-    k_mutex_lock(&transmission, K_FOREVER);
     if(--to_read <= 0) {
+        k_mutex_lock(&transmission, K_FOREVER);
         k_condvar_signal(&transmission_end);
+        k_mutex_unlock(&transmission);
     }
     LOG_INF("\nRemaining to read %d\n", to_read);
-    k_mutex_unlock(&transmission);
 }
 
 uint64_t write(uint8_t data, uint8_t num_response_bits) {
-    k_sleep(K_MSEC(2000));
     LOG_INF("\nWriting %x\n", data);
-    k_sleep(K_MSEC(2000));
 
     uint64_t result;
     // Prepare the bits to be sent
@@ -155,11 +153,13 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
     k_mutex_lock(&transmission, K_FOREVER);
     set_gpio_mode(WRITE);
     go_lo(&tp_dat);
+    go_hi(&tp_clk);
     // Block on condition of transmission end
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
     // Inhibit the next transmission
     go_lo(&tp_clk);
     go_hi(&tp_dat);
+    LOG_INF("\nTransmission completed\n", data);
     k_sleep(K_USEC(10));
     to_read = num_response_bits;
     set_gpio_mode(READ);
