@@ -130,6 +130,7 @@ int read(const struct gpio_dt_spec* spec) {
 }
 
 static void count_read_bytes_fn(struct k_work *work) {
+    LOG_INF("{%s}", current_bytes & 0x01 ? "1" : "0");
     if(--to_read <= 0) {
         k_mutex_lock(&transmission, K_FOREVER);
         k_condvar_signal(&transmission_end);
