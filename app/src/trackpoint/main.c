@@ -30,12 +30,13 @@ static struct gpio_dt_spec tp_rst = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(button0
 K_TIMER_DEFINE(poll_timer, NULL, NULL);
 
 uint8_t bit = 0x01; // TODO: Remove?
-uint8_t to_read;
+int8_t to_read;
 uint64_t current_bytes;
 uint16_t transmit;
 
 static struct k_work_delayable poll_trackpoint;
 static struct k_work count_read_bytes;
+static struct k_work wake_trackpoint;
 
 K_MUTEX_DEFINE(transmission);
 K_CONDVAR_DEFINE(transmission_end);
@@ -85,13 +86,19 @@ static void handle_dat_int(const struct device *gpio,
     }
 }
 
+
+static void handle_clk_lo_sleep_int(const struct device *gpio,
+                                    struct gpio_callback *cb, uint32_t pins)
+{
+    gpio_remove_callback(tp_clk.port, &gpio_sleep_clk_ctx);
+    k_work_submit_to_queue(&trackpoint_work_q, &wake_trackpoint);
+}
+
 void set_gpio_mode(uint8_t mode) {
     gpio_remove_callback(tp_clk.port, &gpio_write_clk_ctx);
     gpio_remove_callback(tp_dat.port, &gpio_read_dat_ctx);
     gpio_remove_callback(tp_clk.port, &gpio_read_clk_ctx);
     gpio_remove_callback(tp_clk.port, &gpio_sleep_clk_ctx);
-
-    LOG_INF("\nChanging mode to %d\n", mode);
 
     if(mode == WRITE) {
         gpio_add_callback(tp_clk.port, &gpio_write_clk_ctx);
@@ -103,6 +110,7 @@ void set_gpio_mode(uint8_t mode) {
         gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
         gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_EDGE_TO_INACTIVE);
     } else {
+        LOG_INF("Rohit cb"); k_sleep(K_SECONDS(1));
         gpio_add_callback(tp_clk.port, &gpio_sleep_clk_ctx);
         gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
         gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_DISABLE);
@@ -127,12 +135,9 @@ static void count_read_bytes_fn(struct k_work *work) {
         k_condvar_signal(&transmission_end);
         k_mutex_unlock(&transmission);
     }
-    LOG_INF("\nRemaining to read %d\n", to_read);
 }
 
 uint64_t write(uint8_t data, uint8_t num_response_bits) {
-    LOG_INF("\nWriting %x\n", data);
-
     uint64_t result;
     // Prepare the bits to be sent
     uint16_t bits;
@@ -158,28 +163,36 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
     // Inhibit the next transmission
     go_lo(&tp_clk);
-    go_hi(&tp_dat);
-    LOG_INF("\nTransmission completed\n", data);
-    k_sleep(K_USEC(10));
-    to_read = num_response_bits;
-    set_gpio_mode(READ);
-    go_hi(&tp_clk);
-    // Read until we have the number of bytes we wanted
-    k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
-    result = current_bytes;
+    k_sleep(K_USEC(50)); // TODO: Can probably remove this
+    if(num_response_bits) {
+        to_read = num_response_bits;
+        set_gpio_mode(READ);
+        go_hi(&tp_clk);
+        // Read until we have the number of bytes we wanted
+        k_condvar_wait(&transmission_end, &transmission, K_SECONDS(5));
+        LOG_INF("R0x%x", num_response_bits - to_read);
+        // Inhibit the next transmission
+        go_lo(&tp_clk);
+        result = current_bytes;
+    }
     k_mutex_unlock(&transmission);
     // Return the bytes we read as an int
     return result;
 }
 
-static void handle_clk_lo_sleep_int(const struct device *gpio,
-                                    struct gpio_callback *cb, uint32_t pins)
-{
-    // Interrupted while sleeping...let's begin the polling
-    write(0xf5, 11); // Disable stream mode
+
+static void wake_trackpoint_fn(struct k_work *work) {
+    LOG_INF("Rohit0"); k_sleep(K_SECONDS(1));
+    // At this point, the trackpoint is still trying to send us data
+    go_lo(&tp_clk); // Do not send
+    k_sleep(K_USEC(300)); // Wait for TP
+    write(0xf5, 0); // Disable stream mode
+    LOG_INF("Rohit1"); k_sleep(K_SECONDS(1));
     k_timer_start(&poll_timer, K_MSEC(POLL_TTL), K_NO_WAIT);
+    LOG_INF("Rohit2"); k_sleep(K_SECONDS(1));
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
 }
+
 
 int8_t bit_reverse(int8_t num) {
     return ((num & 0x01) << 7)
@@ -220,8 +233,6 @@ int16_t x_delta;
 int16_t y_delta;
 static void poll_trackpoint_fn(struct k_work *work)
 {
-    // TODO: Check timer expiry etc.
-    // TODO: Don't update position when either one is 0 (help with noise)
     res = write(0xeb, 44);
     x_delta = byte_at_idx(res, 1);
     y_delta = -byte_at_idx(res, 0);
@@ -241,6 +252,7 @@ static void poll_trackpoint_fn(struct k_work *work)
     } else {
         write(0xf4, 11); // Enable stream mode
         set_gpio_mode(SLEEP);
+        go_hi(&tp_clk);
     }
 }
 
@@ -260,7 +272,8 @@ int zmk_trackpoint_init() {
     gpio_init_callback(&gpio_read_clk_ctx, handle_clk_lo_read_int, BIT(tp_clk.pin));
     gpio_init_callback(&gpio_write_clk_ctx, handle_clk_lo_write_int, BIT(tp_clk.pin));
     gpio_init_callback(&gpio_sleep_clk_ctx, handle_clk_lo_sleep_int, BIT(tp_clk.pin));
-    k_work_init_delayable(&count_read_bytes, count_read_bytes_fn);
+    k_work_init(&count_read_bytes, count_read_bytes_fn);
+    k_work_init(&wake_trackpoint, wake_trackpoint_fn);
     k_work_init_delayable(&poll_trackpoint, poll_trackpoint_fn);
     // Start Trackpoint work
     k_sleep(K_MSEC(500));
@@ -268,7 +281,14 @@ int zmk_trackpoint_init() {
     // Set sensitivity
     set_sensitivity(0xc0);
     // Let's go
-    write(0xf4, 11); // Enable stream mode
-    set_gpio_mode(SLEEP);
+    uint8_t tst = write(0xf4, 11); // Enable stream mode
+    LOG_INF("\nEnable result 0x%x\n", tst);
+    tst = write(0xf5, 11); // Enable stream mode
+    LOG_INF("\nDisable result 0x%x\n", tst);
+//    go_lo(&tp_clk);
+//    k_sleep(K_USEC(100));
+//    set_gpio_mode(SLEEP);
+//    go_hi(&tp_clk);
+    LOG_INF("\nDRES 0x%x\n", tst);
     return 0;
 }
