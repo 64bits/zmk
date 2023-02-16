@@ -132,6 +132,7 @@ static void count_read_bytes_fn(struct k_work *work) {
     LOG_INF("R");
     if(--to_read <= 0) {
         k_mutex_lock(&transmission, K_FOREVER);
+        gpio_remove_callback(tp_clk.port, &gpio_read_clk_ctx);
         k_condvar_signal(&transmission_end);
         k_mutex_unlock(&transmission);
     }
@@ -172,9 +173,17 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
 
     // Switch modes
     k_mutex_lock(&transmission, K_FOREVER);
-    set_gpio_mode(WRITE);
+    // NEW
+    go_lo(&tp_clk);
+    k_sleep(K_USEC(300));
     go_lo(&tp_dat);
-    go_hi(&tp_clk);
+    k_sleep(K_USEC(10));
+    set_gpio_mode(WRITE);
+    go_hi(&tp_clk);	// start bit
+    // ORIGINAL
+//    go_lo(&tp_dat);
+//    go_hi(&tp_clk);
+    // END ORIGINAL
     // Block on condition of transmission end
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
 
@@ -232,9 +241,10 @@ void enter_sleep_mode()
     k_sleep(K_SECONDS(1)); // Required to really get the test testin
     LOG_INF("DOWIT");
     // These are not _really_ writing...
+    // This is supposed to say 'wait, no IO allowed'
     go_lo(&tp_clk);
     go_hi(&tp_dat);
-    k_sleep(K_MSEC(50));
+    k_sleep(K_MSEC(250)); // Doesn't seem to matter if I wait longer?
     // If this can read & write, it's fixed
     write(0xf5, 11);
 
