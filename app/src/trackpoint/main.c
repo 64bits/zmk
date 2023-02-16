@@ -130,13 +130,28 @@ int read(const struct gpio_dt_spec* spec) {
 }
 
 static void count_read_bytes_fn(struct k_work *work) {
-    LOG_INF("{%s}", current_bytes & 0x01 ? "1" : "0");
     if(--to_read <= 0) {
         k_mutex_lock(&transmission, K_FOREVER);
         k_condvar_signal(&transmission_end);
         k_mutex_unlock(&transmission);
     }
 }
+
+int8_t bit_reverse(int8_t num) {
+    return ((num & 0x01) << 7)
+           | ((num & 0x02) << 5)
+           | ((num & 0x04) << 3)
+           | ((num & 0x08) << 1)
+           | ((num & 0x10) >> 1)
+           | ((num & 0x20) >> 3)
+           | ((num & 0x40) >> 5)
+           | ((num & 0x80) >> 7);
+}
+
+int8_t byte_at_idx(uint64_t list, int8_t index) {
+    return bit_reverse((list >> (3+index*11)) & 0xFF);
+}
+
 
 uint64_t write(uint8_t data, uint8_t num_response_bits) {
     uint64_t result;
@@ -162,22 +177,17 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
     go_hi(&tp_clk);
     // Block on condition of transmission end
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
-    // Inhibit the next transmission
-    go_lo(&tp_clk);
-    k_sleep(K_USEC(50)); // TODO: Can probably remove this
-    if(num_response_bits) {
-        to_read = num_response_bits;
-        set_gpio_mode(READ);
-        go_hi(&tp_clk);
-        // Read until we have the number of bytes we wanted
-        k_condvar_wait(&transmission_end, &transmission, K_SECONDS(5));
-        LOG_INF("R0x%x", num_response_bits - to_read);
-        // Inhibit the next transmission
-        go_lo(&tp_clk);
-        result = current_bytes;
-    }
+
+    // We never actually stopped reading the bytes (despite count), so there is a danger of
+    // an extra byte or two getting read in
+    to_read = num_response_bits;
+    set_gpio_mode(READ);
+    k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
+    go_lo(&tp_clk); // Important that this happens as soon as transmission ends
+    current_bytes = current_bytes >> 1;
+    LOG_INF("\nRead %d\n", num_response_bits - to_read);
+    print_all_bytes();
     k_mutex_unlock(&transmission);
-    // Return the bytes we read as an int
     return result;
 }
 
@@ -192,22 +202,6 @@ static void wake_trackpoint_fn(struct k_work *work) {
     k_timer_start(&poll_timer, K_MSEC(POLL_TTL), K_NO_WAIT);
     LOG_INF("Rohit2"); k_sleep(K_SECONDS(1));
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
-}
-
-
-int8_t bit_reverse(int8_t num) {
-    return ((num & 0x01) << 7)
-    | ((num & 0x02) << 5)
-    | ((num & 0x04) << 3)
-    | ((num & 0x08) << 1)
-    | ((num & 0x10) >> 1)
-    | ((num & 0x20) >> 3)
-    | ((num & 0x40) >> 5)
-    | ((num & 0x80) >> 7);
-}
-
-int8_t byte_at_idx(uint64_t list, int8_t index) {
-    return bit_reverse((list >> (3+index*11)) & 0xFF);
 }
 
 void set_sensitivity(uint8_t sens) {
@@ -282,14 +276,10 @@ int zmk_trackpoint_init() {
     // Set sensitivity
     set_sensitivity(0xc0);
     // Let's go
-    uint8_t tst = write(0xf4, 11); // Enable stream mode
-    LOG_INF("\nEnable result 0x%x\n", tst);
-    tst = write(0xf5, 11); // Enable stream mode
-    LOG_INF("\nDisable result 0x%x\n", tst);
+    write(0xf4, 11); // Enable stream mode
 //    go_lo(&tp_clk);
 //    k_sleep(K_USEC(100));
 //    set_gpio_mode(SLEEP);
 //    go_hi(&tp_clk);
-    LOG_INF("\nDRES 0x%x\n", tst);
     return 0;
 }
