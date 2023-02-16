@@ -173,17 +173,8 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
 
     // Switch modes
     k_mutex_lock(&transmission, K_FOREVER);
-    // NEW
-    go_lo(&tp_clk);
-    k_sleep(K_USEC(300));
     go_lo(&tp_dat);
-    k_sleep(K_USEC(10));
-    set_gpio_mode(WRITE);
-    go_hi(&tp_clk);	// start bit
-    // ORIGINAL
-//    go_lo(&tp_dat);
-//    go_hi(&tp_clk);
-    // END ORIGINAL
+    go_hi(&tp_clk);
     // Block on condition of transmission end
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
 
@@ -205,9 +196,9 @@ static void wake_trackpoint_fn(struct k_work *work) {
     LOG_INF("Woke up");
     // Writing at this point seems to work, but reading doesn't
     // I think the write is not _really_ working, I'm just minsinterpreting the clock
-    // go_lo(&tp_clk); // We no longer accept data from the TP
-    //go_hi(&tp_dat); // Just to be sure
-    //k_sleep(K_USEC(200)); // Wait a little
+    go_lo(&tp_clk); // We no longer accept data from the TP
+    go_hi(&tp_dat); // Just to be sure
+    k_sleep(K_USEC(2500)); // Wait a little
     // All that didn't help, still unable to read...perhaps it has to do with mode change
     write(0xf5, 11); // Disable stream mode
     k_timer_start(&poll_timer, K_MSEC(POLL_TTL), K_NO_WAIT);
