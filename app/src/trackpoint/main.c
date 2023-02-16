@@ -227,10 +227,15 @@ void print_all_bytes()
 void enter_sleep_mode()
 {
     write(0xf4, 11); // Enable stream mode
-    set_gpio_mode(SLEEP);
+    // set_gpio_mode(SLEEP); // Turn on when fixed
     go_hi(&tp_clk);
-    k_sleep(K_SECONDS(1));
+    k_sleep(K_SECONDS(1)); // Required to really get the test testin
     LOG_INF("DOWIT");
+    // These are not _really_ writing...
+    go_lo(&tp_clk);
+    go_hi(&tp_dat);
+    k_sleep(K_MSEC(50));
+    // If this can read & write, it's fixed
     write(0xf5, 11);
 
 }
