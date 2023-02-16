@@ -129,6 +129,7 @@ int read(const struct gpio_dt_spec* spec) {
 }
 
 static void count_read_bytes_fn(struct k_work *work) {
+    LOG_INF("R");
     if(--to_read <= 0) {
         k_mutex_lock(&transmission, K_FOREVER);
         k_condvar_signal(&transmission_end);
@@ -192,8 +193,10 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
 
 
 static void wake_trackpoint_fn(struct k_work *work) {
-    LOG_INF("Woke up"); k_sleep(K_SECONDS(1));
-    write(0xf5, 0); // Disable stream mode
+    LOG_INF("Woke up");
+    go_lo(&tp_clk);
+    k_sleep(K_SECONDS(1));
+    write(0xf0, 0); // Disable stream mode
     k_timer_start(&poll_timer, K_MSEC(POLL_TTL), K_NO_WAIT);
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
 }
@@ -220,6 +223,9 @@ void print_all_bytes()
 void enter_sleep_mode()
 {
     write(0xf4, 11); // Enable stream mode
+    k_sleep(K_USEC(150));
+    LOG_INF("Getting out");
+    write(0xf5, 11); // Enable stream mode
     set_gpio_mode(SLEEP);
     go_hi(&tp_clk);
 }
