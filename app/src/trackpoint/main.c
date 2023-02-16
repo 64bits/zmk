@@ -194,9 +194,13 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
 
 static void wake_trackpoint_fn(struct k_work *work) {
     LOG_INF("Woke up");
-    go_lo(&tp_clk);
-    k_sleep(K_SECONDS(1));
-    write(0xf0, 0); // Disable stream mode
+    // Writing at this point seems to work, but reading doesn't
+    // I think the write is not _really_ working, I'm just minsinterpreting the clock
+    // go_lo(&tp_clk); // We no longer accept data from the TP
+    //go_hi(&tp_dat); // Just to be sure
+    //k_sleep(K_USEC(200)); // Wait a little
+    // All that didn't help, still unable to read...perhaps it has to do with mode change
+    write(0xf5, 11); // Disable stream mode
     k_timer_start(&poll_timer, K_MSEC(POLL_TTL), K_NO_WAIT);
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
 }
@@ -223,11 +227,12 @@ void print_all_bytes()
 void enter_sleep_mode()
 {
     write(0xf4, 11); // Enable stream mode
-    k_sleep(K_USEC(150));
-    LOG_INF("Getting out");
-    write(0xf5, 11); // Enable stream mode
     set_gpio_mode(SLEEP);
     go_hi(&tp_clk);
+    k_sleep(K_SECONDS(1));
+    LOG_INF("DOWIT");
+    write(0xf5, 11);
+
 }
 
 uint64_t res;
