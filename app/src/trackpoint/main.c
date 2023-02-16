@@ -110,7 +110,6 @@ void set_gpio_mode(uint8_t mode) {
         gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
         gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_EDGE_TO_INACTIVE);
     } else {
-        LOG_INF("Rohit cb"); k_sleep(K_SECONDS(1));
         gpio_add_callback(tp_clk.port, &gpio_sleep_clk_ctx);
         gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
         gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_DISABLE);
@@ -178,14 +177,14 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
     // Block on condition of transmission end
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
 
-    // We never actually stopped reading the bytes (despite count), so there is a danger of
-    // an extra byte or two getting read in
+    // Read the response
     to_read = num_response_bits;
     set_gpio_mode(READ);
+    LOG_INF("\nWrote, reading\n");
     k_condvar_wait(&transmission_end, &transmission, K_FOREVER);
     go_lo(&tp_clk); // Important that this happens as soon as transmission ends
     current_bytes = current_bytes >> 1;
-    LOG_INF("\nRead %d\n", num_response_bits - to_read);
+    LOG_INF("\nRead %d bits\n", num_response_bits - to_read);
     print_all_bytes();
     k_mutex_unlock(&transmission);
     return result;
@@ -193,14 +192,9 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
 
 
 static void wake_trackpoint_fn(struct k_work *work) {
-    LOG_INF("Rohit0"); k_sleep(K_SECONDS(1));
-    // At this point, the trackpoint is still trying to send us data
-    go_lo(&tp_clk); // Do not send
-    k_sleep(K_USEC(300)); // Wait for TP
+    LOG_INF("Woke up"); k_sleep(K_SECONDS(1));
     write(0xf5, 0); // Disable stream mode
-    LOG_INF("Rohit1"); k_sleep(K_SECONDS(1));
     k_timer_start(&poll_timer, K_MSEC(POLL_TTL), K_NO_WAIT);
-    LOG_INF("Rohit2"); k_sleep(K_SECONDS(1));
     k_work_reschedule_for_queue(&trackpoint_work_q, &poll_trackpoint, K_MSEC(50));
 }
 
@@ -221,6 +215,13 @@ void print_all_bytes()
     LOG_INF("first byte = 0x%x\n", firstByte);
     LOG_INF("second byte = 0x%x\n", secondByte);
     LOG_INF("third byte = 0x%x\n\n", thirdByte);
+}
+
+void enter_sleep_mode()
+{
+    write(0xf4, 11); // Enable stream mode
+    set_gpio_mode(SLEEP);
+    go_hi(&tp_clk);
 }
 
 uint64_t res;
@@ -245,9 +246,7 @@ static void poll_trackpoint_fn(struct k_work *work)
         // If the timer hasn't expired, continue polling
         k_work_reschedule_for_queue(&trackpoint_work_q, work, K_MSEC(50));
     } else {
-        write(0xf4, 11); // Enable stream mode
-        set_gpio_mode(SLEEP);
-        go_hi(&tp_clk);
+        enter_sleep_mode();
     }
 }
 
@@ -276,10 +275,6 @@ int zmk_trackpoint_init() {
     // Set sensitivity
     set_sensitivity(0xc0);
     // Let's go
-    write(0xf4, 11); // Enable stream mode
-//    go_lo(&tp_clk);
-//    k_sleep(K_USEC(100));
-//    set_gpio_mode(SLEEP);
-//    go_hi(&tp_clk);
+    enter_sleep_mode();
     return 0;
 }
