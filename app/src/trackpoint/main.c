@@ -192,8 +192,8 @@ static void poll_trackpoint_fn(struct k_work *work)
 int zmk_trackpoint_init() {
     LOG_INF("\nTrackpoint called\n");
     LOG_INF("\nThe pins are %d, %d, and %d\n", tp_dat.pin, tp_clk.pin, tp_rst.pin);
-    gpio_pin_configure_dt(&tp_clk, GPIO_INPUT | GPIO_OUTPUT_HIGH );
-    gpio_pin_configure_dt(&tp_dat, GPIO_INPUT | GPIO_OUTPUT_HIGH );
+    gpio_pin_configure_dt(&tp_clk, GPIO_INPUT | GPIO_PULL_UP | GPIO_OUTPUT_HIGH );
+    gpio_pin_configure_dt(&tp_dat, GPIO_INPUT | GPIO_PULL_UP | GPIO_OUTPUT_HIGH );
     gpio_pin_configure_dt(&tp_rst, GPIO_OUTPUT);
     gpio_pin_set_dt(&tp_rst, HIGH);
     k_work_queue_start(&trackpoint_work_q, trackpoint_work_stack_area,
