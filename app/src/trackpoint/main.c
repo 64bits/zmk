@@ -110,8 +110,8 @@ void set_gpio_mode(uint8_t mode) {
         gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
         gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_EDGE_TO_INACTIVE);
     } else {
-        gpio_add_callback(tp_clk.port, &gpio_sleep_clk_ctx);
-        gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_EDGE_TO_INACTIVE);
+        // gpio_add_callback(tp_clk.port, &gpio_sleep_clk_ctx); // Turn on when fixed
+        gpio_pin_interrupt_configure_dt(&tp_clk, GPIO_INT_DISABLE);
         gpio_pin_interrupt_configure_dt(&tp_dat, GPIO_INT_DISABLE);
     }
 }
@@ -176,9 +176,9 @@ uint64_t write(uint8_t data, uint8_t num_response_bits) {
     // NEW
     go_lo(&tp_clk);
     k_sleep(K_USEC(300));
+    set_gpio_mode(WRITE);
     go_lo(&tp_dat);
     k_sleep(K_USEC(10));
-    set_gpio_mode(WRITE);
     go_hi(&tp_clk);	// start bit
     // ORIGINAL
 //    go_lo(&tp_dat);
@@ -236,9 +236,10 @@ void print_all_bytes()
 void enter_sleep_mode()
 {
     write(0xf4, 11); // Enable stream mode
-    // set_gpio_mode(SLEEP); // Turn on when fixed
+    set_gpio_mode(SLEEP);
     go_hi(&tp_clk);
-    k_sleep(K_SECONDS(1)); // Required to really get the test testin
+    // This is required to get the test to hang...but why? Does some kind of deadlock occur?
+    k_sleep(K_SECONDS(1));
     LOG_INF("DOWIT");
     // These are not _really_ writing...
     // This is supposed to say 'wait, no IO allowed'
@@ -300,6 +301,9 @@ int zmk_trackpoint_init() {
     gpio_pin_set_dt(&tp_rst, LOW);
     // Set sensitivity
     set_sensitivity(0xc0);
+    // Set sampling rate
+    write(0xf3, 11);
+    write(0x0a, 11);
     // Let's go
     enter_sleep_mode();
     return 0;
